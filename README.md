@@ -24,6 +24,7 @@ The MX live environment is useful for **read-only status checks**. The installer
 
 ```bash
 git clone https://github.com/seba970423/intel-pstate-governor-mxlinux-sysvinit-grub
+cd intel-pstate-governor-mxlinux-sysvinit-grub
 ./status.sh
 sudo ./install.sh --dry-run --kernel-parameter --governor ondemand --yes
 sudo ./install.sh
