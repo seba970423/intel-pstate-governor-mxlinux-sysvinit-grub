@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+set -euo pipefail
+CONFIG_FILE=/etc/intel-pstate-governor.conf
+[[ -r "$CONFIG_FILE" ]] || { echo "Missing $CONFIG_FILE" >&2; exit 1; }
+GOVERNOR=$(sed -n 's/^GOVERNOR=\([A-Za-z0-9_-]*\)$/\1/p' "$CONFIG_FILE" | head -n 1)
+[[ -n "$GOVERNOR" ]] || { echo 'No valid governor configured.' >&2; exit 1; }
+# Generic governors may be built as loadable kernel modules. A passive
+# intel_pstate driver alone does not guarantee that they are registered.
+# Boot-time loading is deliberately in the apply helper so it works on SysVinit.
+case "$GOVERNOR" in
+    ondemand|conservative)
+        module="cpufreq_$GOVERNOR"
+        for policy in /sys/devices/system/cpu/cpufreq/policy*; do
+            [[ -r "$policy/scaling_available_governors" ]] || continue
+            if ! grep -qw -- "$GOVERNOR" "$policy/scaling_available_governors"; then
+                if ! command -v modprobe >/dev/null 2>&1; then
+                    echo "Governor $GOVERNOR requires $module, but modprobe is unavailable." >&2
+                    exit 1
+                fi
+                if ! modprobe "$module"; then
+                    echo "Cannot load $module. This kernel may not provide the $GOVERNOR governor." >&2
+                    exit 1
+                fi
+                break
+            fi
+        done
+        ;;
+esac
+found=0
+failed=0
+for policy in /sys/devices/system/cpu/cpufreq/policy*; do
+    [[ -d "$policy" ]] || continue
+    found=1
+    if [[ ! -r "$policy/scaling_available_governors" || ! -w "$policy/scaling_governor" ]]; then
+        echo "Cannot write governor for $policy" >&2
+        failed=1
+        continue
+    fi
+    if ! grep -qw -- "$GOVERNOR" "$policy/scaling_available_governors"; then
+        echo "Governor $GOVERNOR not available for $policy after module loading (check kernel configuration)." >&2
+        failed=1
+        continue
+    fi
+    if ! printf '%s\n' "$GOVERNOR" > "$policy/scaling_governor"; then
+        echo "Kernel refused governor $GOVERNOR for $policy" >&2
+        failed=1
+        continue
+    fi
+    if [[ "$(<"$policy/scaling_governor")" != "$GOVERNOR" ]]; then
+        echo "Governor was overwritten for $policy" >&2
+        failed=1
+    fi
+done
+(( found )) || { echo 'No CPUFreq policies found.' >&2; exit 1; }
+exit "$failed"

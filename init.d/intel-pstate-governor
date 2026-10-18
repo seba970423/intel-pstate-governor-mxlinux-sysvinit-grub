@@ -1,0 +1,43 @@
+#!/bin/sh
+### BEGIN INIT INFO
+# Provides:          intel-pstate-governor
+# Required-Start:    $local_fs
+# Required-Stop:     $local_fs
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: Apply configured CPU frequency governor
+# Description:       MX Linux SysVinit Intel P-state governor selector
+### END INIT INFO
+
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+HELPER=/usr/local/libexec/intel-pstate-governor/apply-governor
+CONFIG=/etc/intel-pstate-governor.conf
+case "$1" in
+    start|restart|force-reload|reload)
+        [ -x "$HELPER" ] || { echo "Missing $HELPER" >&2; exit 1; }
+        exec "$HELPER"
+        ;;
+    stop)
+        # No daemon: the CPUFreq governor remains in effect until changed.
+        exit 0
+        ;;
+    status)
+        [ -r "$CONFIG" ] || exit 3
+        wanted=$(sed -n 's/^GOVERNOR=\([A-Za-z0-9_-]*\)$/\1/p' "$CONFIG" | head -n 1)
+        [ -n "$wanted" ] || exit 3
+        found=0
+        for p in /sys/devices/system/cpu/cpufreq/policy*/scaling_governor; do
+            [ -r "$p" ] || continue
+            found=1
+            read -r current < "$p"
+            [ "$current" = "$wanted" ] || exit 1
+        done
+        [ "$found" = 1 ] || exit 1
+        printf 'Configured governor %s is active\n' "$wanted"
+        ;;
+    *)
+        echo "Usage: $0 {start|stop|restart|reload|force-reload|status}" >&2
+        exit 2
+        ;;
+esac
